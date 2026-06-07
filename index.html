@@ -383,30 +383,34 @@
     .pm-step-badge { display: none; }
 
     .pm-nav { display: none; }
-    .pm-arrow {
-      position: absolute; top: 50%; z-index: 6;
-      transform: translateY(-50%);
-      background: rgba(0,0,0,0.32); border: 1.5px solid rgba(255,255,255,0.35);
-      color: #fff; cursor: pointer;
-      width: 34px; height: 34px; border-radius: 50%;
-      font-size: 15px; font-weight: 600;
-      display: grid; place-items: center;
-      transition: all .15s; line-height: 1; padding: 0;
+
+    /* Gaussian Splatting button */
+    .pm-gs-btn {
+      position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+      z-index: 6; background: rgba(0,0,0,0.50); border: 1px solid rgba(255,255,255,0.40);
+      color: rgba(255,255,255,0.9); cursor: pointer; border-radius: 20px;
+      padding: 7px 18px; font-size: 10px; letter-spacing: 0.14em;
+      font-family: var(--mono); text-transform: uppercase;
+      transition: background .15s, border-color .15s;
+      white-space: nowrap;
     }
-    .pm-arrow:hover { background: rgba(0,0,0,0.58); border-color: #fff; }
-    .pm-arrow:disabled { opacity: 0.18; cursor: default; }
-    #pmPrev { left: 12px; }
-    #pmNext { right: 12px; }
-    .pm-steps-track {
-      position: absolute; bottom: 12px; left: 50%;
-      transform: translateX(-50%);
-      display: flex; gap: 6px; align-items: center; z-index: 6;
+    .pm-gs-btn:hover { background: rgba(0,0,0,0.75); border-color: rgba(255,255,255,0.8); }
+
+    /* Vertical step slider */
+    .pm-vs-slider {
+      display: none;
+      position: absolute; left: 12px; bottom: 12px;
+      z-index: 6; flex-direction: column; gap: 6px;
     }
-    .pm-step-pip {
-      height: 2px; border-radius: 1px; background: rgba(255,255,255,0.2);
-      transition: width .3s, background .3s;
+    .pm-vs-item {
+      width: 54px; height: 40px; border-radius: 6px;
+      border: 2px solid rgba(255,255,255,0.28);
+      cursor: pointer; overflow: hidden;
+      transition: border-color .15s, box-shadow .15s;
     }
-    .pm-step-pip.active { background: #fff; }
+    .pm-vs-item img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+    .pm-vs-item.active { border-color: #fff; box-shadow: 0 0 0 1px #fff; }
+    .pm-vs-item:hover:not(.active) { border-color: rgba(255,255,255,0.65); }
 
     /* info side — compact, no scroll */
     .pm-info {
@@ -2767,13 +2771,12 @@
         <img id="pmImg2" src="assets/segmentation.gif" alt="Simulation" />
         <video id="pmVideo" autoplay loop muted playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .5s ease;pointer-events:none;"></video>
       </div>
-      <button class="pm-arrow" id="pmPrev" onclick="pmStep(-1)">&lt;</button>
-      <button class="pm-arrow" id="pmNext" onclick="pmStep(1)">&gt;</button>
-      <div class="pm-steps-track">
-        <div class="pm-step-pip active" style="width:40px" id="pmPip0"></div>
-        <div class="pm-step-pip" style="width:40px" id="pmPip1"></div>
-        <div class="pm-step-pip" style="width:40px" id="pmPip2"></div>
+      <div class="pm-vs-slider" id="pmVsSlider">
+        <div class="pm-vs-item active" onclick="pmGsTab(0)"><img id="pmTab0Img" src="" alt="" /></div>
+        <div class="pm-vs-item" onclick="pmGsTab(1)"><img id="pmTab1Img" src="" alt="" /></div>
+        <div class="pm-vs-item" onclick="pmGsTab(2)"><img id="pmTab2Img" src="" alt="" /></div>
       </div>
+      <button class="pm-gs-btn" id="pmGsBtn" onclick="pmActivateGS()">Gaussian Splatting</button>
     </div>
 
     <!-- info -->
@@ -3598,44 +3601,49 @@
 
   // Per-port media sources (idx → {img0, img1, video})
   var PORT_MEDIA = {
-    0: { img0: 'assets/sh-original.png', img1: 'assets/sh-backdrop.png', video: 'assets/sh-scene.mp4' },
-    2: { img0: 'assets/sz-original.webp', img1: 'assets/sz-backdrop.png', video: 'assets/sz-scene.mp4' },
-    3: { img0: 'assets/hk-original.png',  img1: 'assets/hk-backdrop.png',  video: 'assets/hk-scene.mp4' }
+    0: { img0: 'assets/sh-original.png', img1: 'assets/sh-backdrop.png', img2: 'assets/sh-segmentation.png', video: 'assets/sh-scene.mp4' },
+    2: { img0: 'assets/sz-original.webp', img1: 'assets/sz-backdrop.png', img2: 'assets/sz-segmentation.png', video: 'assets/sz-scene.mp4' },
+    3: { img0: 'assets/hk-original.png',  img1: 'assets/hk-backdrop.png',  img2: 'assets/hk-segmentation.png',  video: 'assets/hk-scene.mp4' }
   };
   var _currentMedia = null;
 
-  const PM_STEPS = [
-    { num:'01', name:'Original capture' },
-    { num:'02', name:'3D gaussian splat' },
-    { num:'03', name:'Physics simulation' },
-  ];
   let _pmIdx = 0;
+  let _gsActive = false;
 
-  window.pmTab = function(i) {
-    _pmIdx = i;
+  function _pmResetMedia() {
     var vid = document.getElementById('pmVideo');
-    [0,1,2].forEach(function(j) {
-      document.getElementById('pmImg'+j).classList.toggle('active', j===i);
-      document.getElementById('pmPip'+j).classList.toggle('active', j===i);
-    });
-    // Step 3: show video if available
-    if (i === 2 && _currentMedia && _currentMedia.video) {
-      vid.src = _currentMedia.video;
-      vid.style.opacity = '1';
-      vid.play();
-      document.getElementById('pmImg2').classList.remove('active');
-    } else {
-      vid.style.opacity = '0';
-      vid.pause();
-      vid.src = '';
-    }
-    document.getElementById('pmPrev').disabled = i === 0;
-    document.getElementById('pmNext').disabled = i === PM_STEPS.length - 1;
+    [0,1,2].forEach(function(j){ document.getElementById('pmImg'+j).classList.remove('active'); });
+    vid.style.opacity = '0'; vid.pause(); vid.src = '';
+  }
+
+  window.pmActivateGS = function() {
+    _gsActive = true;
+    document.getElementById('pmGsBtn').style.display = 'none';
+    var slider = document.getElementById('pmVsSlider');
+    slider.style.display = 'flex';
+    pmGsTab(0);
   };
 
-  window.pmStep = function(dir) {
-    const next = Math.max(0, Math.min(PM_STEPS.length - 1, _pmIdx + dir));
-    pmTab(next);
+  window.pmGsTab = function(i) {
+    _pmIdx = i;
+    var vid = document.getElementById('pmVideo');
+    _pmResetMedia();
+    if (i === 0) {
+      if (_currentMedia && _currentMedia.video) {
+        vid.src = _currentMedia.video;
+        vid.style.opacity = '1';
+        vid.play();
+      } else {
+        document.getElementById('pmImg1').classList.add('active');
+      }
+    } else if (i === 1) {
+      document.getElementById('pmImg1').classList.add('active');
+    } else {
+      document.getElementById('pmImg2').classList.add('active');
+    }
+    document.querySelectorAll('.pm-vs-item').forEach(function(el, j) {
+      el.classList.toggle('active', j === i);
+    });
   };
 
   const PM_ICONS = {
@@ -3651,7 +3659,14 @@
   window._openPort = function(idx, evt) {
     var p = PORT_DATA[idx];
     if (!p) return;
-    pmTab(0);
+
+    // Reset GS state
+    _gsActive = false;
+    _pmResetMedia();
+    document.getElementById('pmVsSlider').style.display = 'none';
+    document.getElementById('pmGsBtn').style.display = '';
+    document.querySelectorAll('.pm-vs-item').forEach(function(el, j){ el.classList.toggle('active', j === 0); });
+
     var overlay = document.getElementById('portOverlay');
     var modal   = overlay.querySelector('.port-modal');
     var rect    = overlay.getBoundingClientRect();
@@ -3666,25 +3681,28 @@
 
     // Set per-port media sources
     _currentMedia = PORT_MEDIA[idx] || null;
+    var _t0 = _currentMedia ? _currentMedia.img0 : 'assets/port-scene.jpg';
+    var _t1 = _currentMedia ? _currentMedia.img1 : 'assets/splat.gif';
+    var _t2 = _currentMedia ? (_currentMedia.img2 || 'assets/segmentation.gif') : 'assets/segmentation.gif';
     if (_currentMedia) {
-      document.getElementById('pmImg0').src = _currentMedia.img0;
-      document.getElementById('pmImg1').src = _currentMedia.img1;
+      document.getElementById('pmImg0').src = _t0;
+      document.getElementById('pmImg1').src = _t1;
+      if (_currentMedia.img2) document.getElementById('pmImg2').src = _t2;
     } else {
-      document.getElementById('pmImg0').src = 'assets/port-scene.jpg';
-      document.getElementById('pmImg1').src = 'assets/splat.gif';
-      document.getElementById('pmImg2').src = 'assets/segmentation.gif';
+      document.getElementById('pmImg0').src = _t0;
+      document.getElementById('pmImg1').src = _t1;
+      document.getElementById('pmImg2').src = _t2;
     }
+    document.getElementById('pmTab0Img').src = _t0;
+    document.getElementById('pmTab1Img').src = _t1;
+    document.getElementById('pmTab2Img').src = _t2;
 
-    // Media panel: hide nav for coming-soon, show only placeholder
-    document.getElementById('pmPrev').style.display = isCS ? 'none' : '';
-    document.getElementById('pmNext').style.display = isCS ? 'none' : '';
-    document.querySelector('.pm-steps-track').style.display = isCS ? 'none' : '';
-    // Swap to a single neutral placeholder
-    [0,1,2].forEach(function(j){ document.getElementById('pmImg'+j).classList.remove('active'); });
+    // Show initial image (img0)
     if (isCS) {
       document.getElementById('pmImg0').src = 'assets/port-scene.jpg';
       document.getElementById('pmImg0').style.filter = 'grayscale(1) brightness(0.55)';
       document.getElementById('pmImg0').classList.add('active');
+      document.getElementById('pmGsBtn').style.display = 'none';
     } else {
       document.getElementById('pmImg0').style.filter = '';
       document.getElementById('pmImg0').classList.add('active');
